@@ -604,4 +604,21 @@ namespace BasicSecsGemServer
             Message = message;
         }
     }
+
+    /// <summary>
+    /// Event arguments for HSMS errors
+    /// </summary>
+    public class HsmsErrorEventArgs : EventArgs
+    {
+        public string Message { get; }
+        public Exception? Exception { get; }
+        public DateTime Timestamp { get; }
+
+        public HsmsErrorEventArgs(string message, Exception? exception = null)
+        {
+            Message = message;
+            Exception = exception;
+            Timestamp = DateTime.UtcNow;
+        }
+    }
 }

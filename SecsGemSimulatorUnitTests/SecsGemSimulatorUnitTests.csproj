@@ -20,8 +20,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\SecsGemClient\SecsGemClient.csproj" />
-		<ProjectReference Include="..\SecsGemServer\BasicSecsGemServer.csproj" />
+	  <ProjectReference Include="..\SecsGemServer\BasicSecsGemServer.csproj" />
 	</ItemGroup>
 
 

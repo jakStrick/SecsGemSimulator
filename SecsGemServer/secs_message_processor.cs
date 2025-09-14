@@ -153,6 +153,26 @@ namespace BasicSecsGemServer
             };
         }
 
+
+        public SecsMessage CreateS5F2Message()
+        {
+            // S5F2 - Alarm Report Acknowldege Send
+            var alarmData = new SecsListItem(new List<SecsItem>
+            {
+                //new SecsBinaryItem(BitConverter.GetBytes(alarmId)),  // ALID
+                new SecsBinaryItem(new byte[] { 0x80 }),             // ALCD (Set)
+                //new SecsAsciiItem(alarmText)                         // ALTX
+            });
+
+            return new SecsMessage
+            {
+                Stream = 5,
+                Function = 2,
+                WBit = true,
+                RootItem = alarmData
+            };
+        }
+
         public SecsMessage CreateS6F11Message(uint eventId, Dictionary<string, object> reportData)
         {
             // S6F11 - Event Report Send
@@ -187,6 +207,27 @@ namespace BasicSecsGemServer
             {
                 Stream = 6,
                 Function = 11,
+                WBit = true,
+                RootItem = eventData
+            };
+        }
+
+        public SecsMessage CreateS6F12Message()
+        {
+            // S6F11 - Event Report Send
+
+            // S5F2 - Alarm Report Acknowldege Send
+            var eventData = new SecsListItem(new List<SecsItem>
+            {
+                //new SecsBinaryItem(BitConverter.GetBytes(alarmId)),  // ALID
+                new SecsBinaryItem(new byte[] { 0x80 }),             // ALCD (Set)
+                //new SecsAsciiItem(alarmText)                         // ALTX
+            });
+
+            return new SecsMessage
+            {
+                Stream = 6,
+                Function = 12,
                 WBit = true,
                 RootItem = eventData
             };

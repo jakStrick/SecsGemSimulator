@@ -1,3 +1,10 @@
+//Unit test  for solution SecsGemSimulator
+// This file is part of the SecsGemSimulatorUnitTests project
+// Copyright DCSS LLC. All rights reserved.
+// David Strickland 2025
+
+using System.Windows.Forms;
+using System;
 namespace SecsGemSimulatorUnitTests
 {
     internal static class Program

@@ -1,3 +1,5 @@
+
+using SecsGemClient;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -6,15 +8,12 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SecsGemClient
+namespace BasicSecsGemServer
 {
     // HSMS Connection Manager - Core SEMI E30 Implementation
     public class HsmsConnection
     {
-
-
-
-        private readonly TcpClient? tcpClient;
+        private TcpClient? tcpClient;
         private readonly CancellationTokenSource cancellationTokenSource;
         private readonly ConcurrentQueue<SecsMessage> messageQueue;
         private readonly SemaphoreSlim sendSemaphore;
@@ -25,7 +24,6 @@ namespace SecsGemClient
         public IPAddress? RemoteEndpoint { get; private set; }
         public int? Port { get; private set; }
         public int DeviceId { get; private set; }
-
 
         // HSMS Session Management
         private System.Threading.Timer? linkTestTimer;
@@ -47,17 +45,18 @@ namespace SecsGemClient
             sendSemaphore = new SemaphoreSlim(1, 1);
             IsConnected = false;
             tcpClient = new TcpClient();
+            IPAddress defaultIpAddress = new([0, 0, 0, 0]);
+            RemoteEndpoint = defaultIpAddress;
             linkTestTimer = null;
             ConnectionStateChanged = HsmsConnection_ConnectionStateChanged;
             MessageReceived = HsmsConnection_MessageReceived;
             cancellationTokenSource = new CancellationTokenSource();
             TcpStream = null;
-            RemoteEndpoint = null;
-            Port = null;
         }
 
         private void HsmsConnection_MessageReceived(object? sender, SecsMessageEventArgs e)
         {
+            return;
             throw new NotImplementedException();
         }
 
@@ -78,10 +77,16 @@ namespace SecsGemClient
                 Port = port;
                 DeviceId = deviceId;
 
+                if (tcpClient == null)
+                    tcpClient = new TcpClient();
+
 
                 OnConnectionStateChanged(ConnectionState.Connecting);
 
-                await tcpClient.ConnectAsync(ipAddress, port);
+                if (tcpClient != null)
+                    await tcpClient.ConnectAsync(ipAddress, port);
+                else
+                    throw new HsmsException("TcpClient is not initialized.");
 
                 TcpStream = tcpClient.GetStream();
 
@@ -127,6 +132,7 @@ namespace SecsGemClient
 
                 TcpStream.Close();
                 tcpClient.Close();
+                tcpClient = null;
 
                 OnConnectionStateChanged(ConnectionState.Disconnected);
             }
@@ -225,7 +231,7 @@ namespace SecsGemClient
                     {
                         var dataLength = hsmsHeader.Length - 10;
                         messageData = new byte[dataLength];
-                        bytesRead = 0;
+                        //bytesRead = 0;
 
                         while (bytesRead < dataLength && IsConnected)
                         {
@@ -514,10 +520,7 @@ namespace SecsGemClient
         {
             linkTestTimer?.Dispose();
             cancellationTokenSource.Dispose();
-            if (tcpStream != null)
-            {
-                tcpStream.Dispose();
-            }
+            tcpStream.Dispose();
             tcpClient?.Dispose();
             sendSemaphore?.Dispose();
         }

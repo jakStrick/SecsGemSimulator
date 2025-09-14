@@ -3,14 +3,74 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
 using System.Net;
+using System.Collections.Generic;
 
 namespace BasicSecsGemServer
 {
+    // SECS/GEM Message Definitions (Same as equipment side)
+    public static class SecsGemMessages
+    {
+        // Dictionary for SECS message definitions
+        public static readonly Dictionary<string, (string Description, bool AutoRespond)> MessageDefinitions =
+            new Dictionary<string, (string, bool)>
+            {
+                // Stream 0 - System Messages
+                ["S0F0"] = ("Link Test Request", false),
+                ["S0F1"] = ("Link Test Response", false),
+
+                // Stream 1 - Equipment Status
+                ["S1F1"] = ("Are You There Request", false),
+                ["S1F2"] = ("Are You There Response", false),
+                ["S1F3"] = ("Selected Equipment Status Request", false),
+                ["S1F4"] = ("Selected Equipment Status Response", false),
+                ["S1F13"] = ("Establish Communications Request", false),
+                ["S1F14"] = ("Establish Communications Acknowledge", false),
+
+                // Stream 2 - Equipment Control and Diagnostics
+                ["S2F17"] = ("Date and Time Request", false),
+                ["S2F18"] = ("Date and Time Response", false),
+                ["S2F21"] = ("Remote Command Send", false),
+                ["S2F22"] = ("Remote Command Acknowledge", false),
+
+                // Stream 5 - Exception Handling
+                ["S5F1"] = ("Alarm Report Send", false),
+                ["S5F2"] = ("Alarm Report Acknowledge", false),
+
+                // Stream 6 - Data Collection
+                ["S6F11"] = ("Event Report Send", false),
+                ["S6F12"] = ("Event Report Acknowledge", false),
+
+                // Stream 7 - Process Program Management
+                ["S7F1"] = ("Process Program Load Inquire", false),
+                ["S7F2"] = ("Process Program Load Grant", false),
+
+                // Stream 10 - Terminal Services
+                ["S10F1"] = ("Terminal Request", false),
+                ["S10F2"] = ("Terminal Acknowledge", false)
+            };
+
+        // Host Events (different from equipment events)
+        public static class Events
+        {
+            public const int HostStatusUpdate = 1001;
+            public const int EquipmentConnected = 1002;
+            public const int EquipmentDisconnected = 1003;
+            public const int CommunicationEstablished = 1004;
+            public const int PeriodicHeartbeat = 1005;
+        }
+
+        // Host Commands
+        public static class Commands
+        {
+            public const int StartProcess = 2001;
+            public const int StopProcess = 2002;
+            public const int GetStatus = 2003;
+            public const int Reset = 2004;
+        }
+    }
+
     public partial class MainForm : Form
     {
-
-
-
         private HsmsConnection _hsmsConnection;
         private SecsMessageProcessor _messageProcessor;
         private GemStateManager _stateManager;
@@ -39,7 +99,6 @@ namespace BasicSecsGemServer
             InitializeSecsGem();
             SetupEventHandlers();
         }
-
 
         private void CreateControls()
         {
@@ -188,14 +247,14 @@ namespace BasicSecsGemServer
             _messageProcessor = new SecsMessageProcessor();
             _hsmsConnection = new HsmsConnection();
 
-            // Subscribe to your existing events
+            // Subscribe to events
             _hsmsConnection.ConnectionStateChanged += OnConnectionStateChanged;
             _hsmsConnection.MessageReceived += OnMessageReceived;
             _messageProcessor.MessageProcessed += OnMessageProcessed;
             _stateManager.StateChanged += OnGemStateChanged;
             _stateManager.OnEventTriggered += OnEventTriggered;
 
-            LogMessage("SECS/GEM Host initialized using existing code structure", LogType.General);
+            LogMessage("SECS/GEM Host initialized using refactored message handling", LogType.General);
         }
 
         private async void ConnectButton_Click(object sender, EventArgs e)
@@ -210,7 +269,6 @@ namespace BasicSecsGemServer
                 connectionStatusLabel.Text = "Status: Starting...";
                 connectionStatusLabel.ForeColor = Color.Orange;
 
-                // Use your existing HsmsConnection
                 bool connected = await _hsmsConnection.ConnectAsync(ipAddress, port, deviceId);
 
                 if (connected)
@@ -220,6 +278,9 @@ namespace BasicSecsGemServer
                     connectButton.Enabled = false;
                     disconnectButton.Enabled = true;
                     sendTestButton.Enabled = true;
+
+                    // Send initial event
+                    SendHostEvent(SecsGemMessages.Events.EquipmentConnected, "Host connection established");
 
                     // Start periodic tasks
                     _ = Task.Run(SendPeriodicMessages);
@@ -244,6 +305,10 @@ namespace BasicSecsGemServer
             {
                 if (_hsmsConnection != null)
                 {
+                    // Send disconnect event before closing
+                    SendHostEvent(SecsGemMessages.Events.EquipmentDisconnected, "Host disconnecting");
+                    await Task.Delay(500); // Allow message to send
+
                     await _hsmsConnection.DisconnectAsync();
                 }
 
@@ -268,7 +333,6 @@ namespace BasicSecsGemServer
             {
                 try
                 {
-                    // Use your existing message processor
                     var s1f1Message = SecsMessageProcessor.CreateS1F1Message();
                     _hsmsConnection.SendMessage(s1f1Message);
 
@@ -327,7 +391,8 @@ namespace BasicSecsGemServer
             if (e.Message == null) return;
 
             var msg = e.Message;
-            var messageText = $"S{msg.Stream}F{msg.Function}";
+            var messageKey = $"S{msg.Stream}F{msg.Function}";
+            var messageText = $"{messageKey}{(msg.WBit ? "W" : "")}";
 
             this.Invoke((MethodInvoker)delegate
             {
@@ -338,7 +403,6 @@ namespace BasicSecsGemServer
 
             try
             {
-                // Handle standard SECS messages using your existing processor
                 HandleIncomingMessage(msg);
             }
             catch (Exception ex)
@@ -347,47 +411,119 @@ namespace BasicSecsGemServer
             }
         }
 
+        // Refactored message handling method using the message definitions
         private void HandleIncomingMessage(SecsMessage message)
         {
-            switch ($"S{message.Stream}F{message.Function}")
+            var messageKey = $"S{message.Stream}F{message.Function}";
+
+            // Check if message is defined
+            if (!SecsGemMessages.MessageDefinitions.TryGetValue(messageKey, out var messageInfo))
             {
-                case "S0F1": // Are You There Request
-                    var s0f1 = _messageProcessor.CreateS1F2Message();
-                    s0f1.SystemBytes = message.SystemBytes; // Reply with same system bytes
-                    _hsmsConnection.SendMessage(s0f1);
-                    AddMessageToLog("TX: S0F1 - Online Data");
-                    LogMessage("Sent S0F1 - Online Data", LogType.SML);
-                    break;
+                LogMessage($"Unknown message received: {messageKey}", LogType.General);
+                return;
+            }
 
-                case "S1F1": // Are You There Request
-                    var s1f2 = _messageProcessor.CreateS1F2Message();
-                    s1f2.SystemBytes = message.SystemBytes; // Reply with same system bytes
-                    _hsmsConnection.SendMessage(s1f2);
-                    AddMessageToLog("TX: S1F2 - Online Data");
-                    LogMessage("Sent S1F2 - Online Data", LogType.SML);
-                    break;
+            LogMessage($"Processing: {messageInfo.Description}", LogType.SML);
 
-                case "S1F13": // Establish Communications Request
-                    var s1f14 = _messageProcessor.CreateS1F14Message();
-                    s1f14.SystemBytes = message.SystemBytes;
-                    _hsmsConnection.SendMessage(s1f14);
-                    AddMessageToLog("TX: S1F14 - Establish Comm Ack");
-                    LogMessage("Sent S1F14 - Establish Communications Acknowledge", LogType.SML);
-                    break;
+            // Handle the message based on its type
+            ProcessKnownMessage(message, messageKey, messageInfo);
+        }
 
-                case "S2F17": // Date/Time Request
-                    var s2f18 = _messageProcessor.CreateS2F18Message();
-                    s2f18.SystemBytes = message.SystemBytes;
-                    _hsmsConnection.SendMessage(s2f18);
-                    AddMessageToLog($"TX: S2F18 - Date/Time: {DateTime.Now}");
-                    LogMessage($"Sent S2F18 - Date/Time: {DateTime.Now}", LogType.SML);
-                    break;
+        private void ProcessKnownMessage(SecsMessage message, string messageKey, (string Description, bool AutoRespond) messageInfo)
+        {
+            try
+            {
+                switch (messageKey)
+                {
+                    case "S1F2":
+                        HandleAreYouThereResponse(message);
+                        break;
 
-                default:
-                    LogMessage($"Unhandled message: S{message.Stream}F{message.Function}", LogType.General);
-                    break;
+                    case "S1F14":
+                        HandleEstablishCommunicationsAcknowledge(message);
+                        break;
+
+                    case "S2F18":
+                        HandleDateTimeResponse(message);
+                        break;
+
+                    case "S5F1":
+                        HandleAlarmReport(message);
+                        break;
+
+                    case "S6F11":
+                        HandleEventReport(message);
+                        break;
+
+                    // Equipment responses to our requests
+                    case "S0F1":
+                        HandleLinkTestResponse(message);
+                        break;
+
+                    default:
+                        LogMessage($"Message {messageKey} ({messageInfo.Description}) received but not specifically handled", LogType.General);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error handling {messageKey}: {ex.Message}", LogType.General);
             }
         }
+
+        #region Message Handlers
+
+        private void HandleAreYouThereResponse(SecsMessage message)
+        {
+            LogMessage("Equipment responded to Are You There request - Equipment is online", LogType.SML);
+            AddMessageToLog("Equipment is online and responding");
+        }
+
+        private void HandleEstablishCommunicationsAcknowledge(SecsMessage message)
+        {
+            LogMessage("Communications established with equipment", LogType.SML);
+            AddMessageToLog("Communications established");
+
+            // Send event about successful communication
+            SendHostEvent(SecsGemMessages.Events.CommunicationEstablished, "Communication link established with equipment");
+        }
+
+        private void HandleDateTimeResponse(SecsMessage message)
+        {
+            LogMessage("Received current date/time from equipment", LogType.SML);
+            // Could parse the date/time data here if needed
+        }
+
+        private void HandleAlarmReport(SecsMessage message)
+        {
+            LogMessage("Received alarm report from equipment", LogType.SML);
+            AddMessageToLog("Equipment alarm received");
+
+            // Send acknowledge for alarm
+            var s5f2 = _messageProcessor.CreateS5F2Message();
+            s5f2.SystemBytes = message.SystemBytes;
+            _hsmsConnection.SendMessage(s5f2);
+            AddMessageToLog("TX: S5F2 - Alarm Acknowledge");
+        }
+
+        private void HandleEventReport(SecsMessage message)
+        {
+            LogMessage("Received event report from equipment", LogType.SML);
+            AddMessageToLog("Equipment event received");
+
+            // Send acknowledge for event
+            var s6f12 = _messageProcessor.CreateS6F12Message();
+            s6f12.SystemBytes = message.SystemBytes;
+            _hsmsConnection.SendMessage(s6f12);
+            AddMessageToLog("TX: S6F12 - Event Acknowledge");
+        }
+
+        private void HandleLinkTestResponse(SecsMessage message)
+        {
+            LogMessage("Equipment responded to link test - Connection is healthy", LogType.SML);
+        }
+
+        #endregion
 
         private async Task SendPeriodicMessages()
         {
@@ -400,35 +536,37 @@ namespace BasicSecsGemServer
                 if (_hsmsConnection.IsConnected)
                 {
                     messageCount++;
-                    SendS6F11EventReport($"Periodic host message #{messageCount}");
+                    SendHostEvent(SecsGemMessages.Events.PeriodicHeartbeat, $"Periodic host heartbeat #{messageCount}");
                 }
             }
         }
 
-        private void SendS6F11EventReport(string eventText)
+        private void SendHostEvent(uint eventId, string eventDescription)
         {
             try
             {
                 var eventData = new Dictionary<string, object>
                 {
-                    ["EventText"] = eventText,
+                    ["EventId"] = eventId,
+                    ["EventDescription"] = eventDescription,
                     ["Timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                    ["HostStatus"] = "ACTIVE"
+                    ["HostStatus"] = "ACTIVE",
+                    ["HostVersion"] = "1.0.0"
                 };
 
-                var s6f11 = _messageProcessor.CreateS6F11Message(1001, eventData);
+                var s6f11 = _messageProcessor.CreateS6F11Message(eventId, eventData);
                 _hsmsConnection.SendMessage(s6f11);
 
                 this.Invoke((MethodInvoker)delegate
                 {
-                    AddMessageToLog($"TX: S6F11 - {eventText}");
+                    AddMessageToLog($"TX: S6F11 - {eventDescription}");
                 });
 
-                LogMessage($"Sent event report: {eventText}", LogType.SML);
+                LogMessage($"Sent host event: {eventDescription}", LogType.SML);
             }
             catch (Exception ex)
             {
-                LogMessage($"Error sending event report: {ex.Message}", LogType.General);
+                LogMessage($"Error sending host event: {ex.Message}", LogType.General);
             }
         }
 
@@ -511,7 +649,5 @@ namespace BasicSecsGemServer
                 await _hsmsConnection.DisconnectAsync();
             }
         }
-
     }
-
 }

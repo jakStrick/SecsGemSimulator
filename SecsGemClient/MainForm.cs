@@ -8,6 +8,66 @@ using System.Net.Sockets;
 
 namespace SecsGemClient
 {
+    // SECS/GEM Message Definitions
+    public static class SecsGemMessages
+    {
+        // Dictionary for SECS message definitions
+        public static readonly Dictionary<string, (string Description, bool AutoRespond)> MessageDefinitions =
+            new Dictionary<string, (string, bool)>
+            {
+                // Stream 0 - System Messages
+                ["S0F0"] = ("Link Test Request", true),
+
+                // Stream 1 - Equipment Status
+                ["S1F1"] = ("Are You There Request", true),
+                ["S1F2"] = ("Are You There Response", false),
+                ["S1F3"] = ("Selected Equipment Status Request", true),
+                ["S1F4"] = ("Selected Equipment Status Response", false),
+                ["S1F13"] = ("Establish Communications Request", true),
+                ["S1F14"] = ("Establish Communications Acknowledge", false),
+
+                // Stream 2 - Equipment Control and Diagnostics
+                ["S2F17"] = ("Date and Time Request", true),
+                ["S2F18"] = ("Date and Time Response", false),
+                ["S2F21"] = ("Remote Command Send", false),
+                ["S2F22"] = ("Remote Command Acknowledge", false),
+
+                // Stream 5 - Exception Handling
+                ["S5F1"] = ("Alarm Report Send", false),
+                ["S5F2"] = ("Alarm Report Acknowledge", false),
+
+                // Stream 6 - Data Collection
+                ["S6F11"] = ("Event Report Send", false),
+                ["S6F12"] = ("Event Report Acknowledge", false),
+
+                // Stream 7 - Process Program Management
+                ["S7F1"] = ("Process Program Load Inquire", false),
+                ["S7F2"] = ("Process Program Load Grant", false),
+
+                // Stream 10 - Terminal Services
+                ["S10F1"] = ("Terminal Request", false),
+                ["S10F2"] = ("Terminal Acknowledge", false)
+            };
+
+        // Equipment Events
+        public static class Events
+        {
+            public const int ProcessStarted = 10;
+            public const int ProcessCompleted = 11;
+            public const int AlarmSet = 20;
+            public const int AlarmCleared = 21;
+            public const int StatusUpdate = 999;
+        }
+
+        // Common Alarm IDs
+        public static class Alarms
+        {
+            public const int TestAlarm = 101;
+            public const int CommunicationError = 102;
+            public const int ProcessError = 103;
+        }
+    }
+
     public partial class MainForm : Form
     {
         private TcpListener _tcpListener;
@@ -438,9 +498,11 @@ namespace SecsGemClient
             }
         }
 
+        // Refactored message handling method using the message definitions
         private async Task HandleIncomingMessage(SecsMessage message)
         {
-            var messageText = $"S{message.Stream}F{message.Function}{(message.WBit ? "W" : "")}";
+            var messageKey = $"S{message.Stream}F{message.Function}";
+            var messageText = $"{messageKey}{(message.WBit ? "W" : "")}";
 
             this.Invoke((MethodInvoker)delegate
             {
@@ -449,70 +511,155 @@ namespace SecsGemClient
 
             LogMessage($"Received: {messageText}", LogType.SML);
 
-            switch ($"S{message.Stream}F{message.Function}")
+            // Check if message is defined
+            if (!SecsGemMessages.MessageDefinitions.TryGetValue(messageKey, out var messageInfo))
             {
-                case "S0F0": // Are You There Request from Host - Auto respond
-                    var s0f1 = _messageProcessor.CreateS0F1Message();
-                    s0f1.SystemBytes = message.SystemBytes;
-                    s0f1.SessionId = message.SessionId;
-                    SendSecsMessage(s0f1);
-                    AddMessageToLog("TX: S0F1 - Online Data (Auto)");
-                    LogMessage("Auto-sent S1F2 - Online Data", LogType.SML);
-                    break;
+                LogMessage($"Unknown message received: {messageKey}", LogType.General);
+                if (message.WBit)
+                {
+                    SendGenericAcknowledge(message);
+                }
+                return;
+            }
 
-                case "S1F1": // Are You There Request from Host - Auto respond
-                    var s1f2 = _messageProcessor.CreateS1F2Message();
-                    s1f2.SystemBytes = message.SystemBytes;
-                    s1f2.SessionId = message.SessionId;
-                    SendSecsMessage(s1f2);
-                    AddMessageToLog("TX: S1F2 - Online Data (Auto)");
-                    LogMessage("Auto-sent S1F2 - Online Data", LogType.SML);
-                    break;
+            LogMessage($"Processing: {messageInfo.Description}", LogType.SML);
 
-                case "S1F13": // Establish Communications Request from Host - Auto respond
-                    var s1f14 = _messageProcessor.CreateS1F14Message();
-                    s1f14.SystemBytes = message.SystemBytes;
-                    s1f14.SessionId = message.SessionId;
-                    SendSecsMessage(s1f14);
-                    AddMessageToLog("TX: S1F14 - Establish Comm Ack (Auto)");
-                    LogMessage("Auto-sent S1F14 - Establish Communications Acknowledge", LogType.SML);
+            // Handle the message based on its type
+            var handled = await ProcessKnownMessage(message, messageKey, messageInfo);
 
-                    // Automatically go online after establishing communications
-                    await Task.Delay(1000);
-                    AutomaticallyGoOnline();
-                    break;
-
-                case "S2F17": // Date/Time Request from Host - Auto respond
-                    var s2f18 = _messageProcessor.CreateS2F18Message();
-                    s2f18.SystemBytes = message.SystemBytes;
-                    s2f18.SessionId = message.SessionId;
-                    SendSecsMessage(s2f18);
-                    AddMessageToLog($"TX: S2F18 - Date/Time: {DateTime.Now} (Auto)");
-                    LogMessage($"Auto-sent S2F18 - Date/Time: {DateTime.Now}", LogType.SML);
-                    break;
-
-                case "S1F2": // Host's response to our S1F1
-                    LogMessage("Host responded to Are You There request", LogType.SML);
-                    break;
-
-                case "S1F14": // Host's response to our S1F13
-                    LogMessage("Communications established with host", LogType.SML);
-                    break;
-
-                case "S2F18": // Host's response to our S2F17
-                    LogMessage("Received date/time from host", LogType.SML);
-                    break;
-
-                default:
-                    LogMessage($"Unhandled message from host: S{message.Stream}F{message.Function}", LogType.General);
-                    // Auto-send a generic acknowledge for W-bit messages we don't specifically handle
-                    if (message.WBit)
-                    {
-                        SendGenericAcknowledge(message);
-                    }
-                    break;
+            // Send generic acknowledge for unhandled W-bit messages
+            if (!handled && message.WBit)
+            {
+                SendGenericAcknowledge(message);
             }
         }
+
+        private async Task<bool> ProcessKnownMessage(SecsMessage message, string messageKey, (string Description, bool AutoRespond) messageInfo)
+        {
+            try
+            {
+                switch (messageKey)
+                {
+                    case "S0F0":
+                        return HandleLinkTestRequest(message);
+
+                    case "S1F1":
+                        return HandleAreYouThereRequest(message);
+
+                    case "S1F2":
+                        return HandleAreYouThereResponse(message);
+
+                    case "S1F13":
+                        return await HandleEstablishCommunicationsRequest(message);
+
+                    case "S1F14":
+                        return HandleEstablishCommunicationsAcknowledge(message);
+
+                    case "S2F17":
+                        return HandleDateTimeRequest(message);
+
+                    case "S2F18":
+                        return HandleDateTimeResponse(message);
+
+                    case "S5F1":
+                        return HandleAlarmReport(message);
+
+                    case "S6F11":
+                        return HandleEventReport(message);
+
+                    default:
+                        LogMessage($"Message {messageKey} ({messageInfo.Description}) received but not specifically handled", LogType.General);
+                        return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error handling {messageKey}: {ex.Message}", LogType.General);
+                return false;
+            }
+        }
+
+        #region Message Handlers
+
+        private bool HandleLinkTestRequest(SecsMessage message)
+        {
+            var response = _messageProcessor.CreateS0F1Message();
+            response.SystemBytes = message.SystemBytes;
+            response.SessionId = message.SessionId;
+            SendSecsMessage(response);
+            AddMessageToLog("TX: S0F1 - Link Test Response (Auto)");
+            LogMessage("Auto-sent S0F1 - Link Test Response", LogType.SML);
+            return true;
+        }
+
+        private bool HandleAreYouThereRequest(SecsMessage message)
+        {
+            var response = _messageProcessor.CreateS1F2Message();
+            response.SystemBytes = message.SystemBytes;
+            response.SessionId = message.SessionId;
+            SendSecsMessage(response);
+            AddMessageToLog("TX: S1F2 - Online Data (Auto)");
+            LogMessage("Auto-sent S1F2 - Online Data", LogType.SML);
+            return true;
+        }
+
+        private bool HandleAreYouThereResponse(SecsMessage message)
+        {
+            LogMessage("Host responded to Are You There request", LogType.SML);
+            return true;
+        }
+
+        private async Task<bool> HandleEstablishCommunicationsRequest(SecsMessage message)
+        {
+            var response = _messageProcessor.CreateS1F14Message();
+            response.SystemBytes = message.SystemBytes;
+            response.SessionId = message.SessionId;
+            SendSecsMessage(response);
+            AddMessageToLog("TX: S1F14 - Establish Comm Ack (Auto)");
+            LogMessage("Auto-sent S1F14 - Establish Communications Acknowledge", LogType.SML);
+
+            // Automatically go online after establishing communications
+            await Task.Delay(1000);
+            AutomaticallyGoOnline();
+            return true;
+        }
+
+        private bool HandleEstablishCommunicationsAcknowledge(SecsMessage message)
+        {
+            LogMessage("Communications established with host", LogType.SML);
+            return true;
+        }
+
+        private bool HandleDateTimeRequest(SecsMessage message)
+        {
+            var response = _messageProcessor.CreateS2F18Message();
+            response.SystemBytes = message.SystemBytes;
+            response.SessionId = message.SessionId;
+            SendSecsMessage(response);
+            AddMessageToLog($"TX: S2F18 - Date/Time: {DateTime.Now} (Auto)");
+            LogMessage($"Auto-sent S2F18 - Date/Time: {DateTime.Now}", LogType.SML);
+            return true;
+        }
+
+        private bool HandleDateTimeResponse(SecsMessage message)
+        {
+            LogMessage("Received date/time from host", LogType.SML);
+            return true;
+        }
+
+        private bool HandleAlarmReport(SecsMessage message)
+        {
+            LogMessage("Received alarm report from host", LogType.SML);
+            return true;
+        }
+
+        private bool HandleEventReport(SecsMessage message)
+        {
+            LogMessage("Received event report from host", LogType.SML);
+            return true;
+        }
+
+        #endregion
 
         private void SendSecsMessage(SecsMessage message)
         {
@@ -602,6 +749,7 @@ namespace SecsGemClient
             }
         }
 
+        // Refactored button click handlers using constants
         private void SendTestButton_Click(object sender, EventArgs e)
         {
             if (_connectedHost?.Connected == true)
@@ -628,9 +776,9 @@ namespace SecsGemClient
             {
                 try
                 {
-                    _stateManager.SetAlarm(101, "Test Equipment Alarm", AlarmSeverity.Warning);
+                    _stateManager.SetAlarm(SecsGemMessages.Alarms.TestAlarm, "Test Equipment Alarm", AlarmSeverity.Warning);
 
-                    var s5f1Message = _messageProcessor.CreateS5F1Message(101, "Test Equipment Alarm");
+                    var s5f1Message = _messageProcessor.CreateS5F1Message(SecsGemMessages.Alarms.TestAlarm, "Test Equipment Alarm");
                     s5f1Message.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
                     SendSecsMessage(s5f1Message);
 
@@ -648,27 +796,13 @@ namespace SecsGemClient
         {
             try
             {
-                _stateManager.StartProcessJob("PROC_001");
+                var processJobId = "PROC_001";
+                _stateManager.StartProcessJob(processJobId);
                 equipmentStateLabel.Text = "Equipment State: PROCESSING";
                 equipmentStateLabel.ForeColor = Color.Green;
 
-                // Send process started event
-                var eventData = new Dictionary<string, object>
-                {
-                    ["ProcessJobId"] = "PROC_001",
-                    ["Recipe"] = "TestRecipe_001",
-                    ["StartTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                };
-
-                if (_connectedHost?.Connected == true)
-                {
-                    var s6f11Message = _messageProcessor.CreateS6F11Message(10, eventData);
-                    s6f11Message.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
-                    SendSecsMessage(s6f11Message);
-                    AddMessageToLog("TX: S6F11 - Process Started");
-                }
-
-                LogMessage("Process started - PROC_001", LogType.General);
+                SendProcessEvent(SecsGemMessages.Events.ProcessStarted, processJobId, "TestRecipe_001");
+                LogMessage($"Process started - {processJobId}", LogType.General);
             }
             catch (Exception ex)
             {
@@ -680,31 +814,47 @@ namespace SecsGemClient
         {
             try
             {
-                _stateManager.CompleteProcessJob("PROC_001");
+                var processJobId = "PROC_001";
+                _stateManager.CompleteProcessJob(processJobId);
                 equipmentStateLabel.Text = "Equipment State: IDLE";
                 equipmentStateLabel.ForeColor = Color.Blue;
 
-                // Send process completed event
-                var eventData = new Dictionary<string, object>
-                {
-                    ["ProcessJobId"] = "PROC_001",
-                    ["CompletionStatus"] = "SUCCESS",
-                    ["EndTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                };
-
-                if (_connectedHost?.Connected == true)
-                {
-                    var s6f11Message = _messageProcessor.CreateS6F11Message(11, eventData);
-                    s6f11Message.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
-                    SendSecsMessage(s6f11Message);
-                    AddMessageToLog("TX: S6F11 - Process Completed");
-                }
-
-                LogMessage("Process completed - PROC_001", LogType.General);
+                SendProcessEvent(SecsGemMessages.Events.ProcessCompleted, processJobId, null, "SUCCESS");
+                LogMessage($"Process completed - {processJobId}", LogType.General);
             }
             catch (Exception ex)
             {
                 LogMessage($"Error completing process: {ex.Message}", LogType.General);
+            }
+        }
+
+        private void SendProcessEvent(uint eventId, string processJobId, string recipe = null, string status = null)
+        {
+            if (_connectedHost?.Connected == true)
+            {
+                var eventData = new Dictionary<string, object>
+                {
+                    ["ProcessJobId"] = processJobId,
+                    ["Timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+                };
+
+                if (eventId == SecsGemMessages.Events.ProcessStarted && !string.IsNullOrEmpty(recipe))
+                {
+                    eventData["Recipe"] = recipe;
+                    eventData["StartTime"] = eventData["Timestamp"];
+                }
+                else if (eventId == SecsGemMessages.Events.ProcessCompleted && !string.IsNullOrEmpty(status))
+                {
+                    eventData["CompletionStatus"] = status;
+                    eventData["EndTime"] = eventData["Timestamp"];
+                }
+
+                var s6f11Message = _messageProcessor.CreateS6F11Message(eventId, eventData);
+                s6f11Message.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
+                SendSecsMessage(s6f11Message);
+
+                var eventName = eventId == SecsGemMessages.Events.ProcessStarted ? "Started" : "Completed";
+                AddMessageToLog($"TX: S6F11 - Process {eventName}");
             }
         }
 
@@ -801,6 +951,7 @@ namespace SecsGemClient
             try
             {
                 string processJobId = $"AUTO_PROC_{processNumber:D3}";
+                string recipe = $"AutoRecipe_{processNumber}";
 
                 // Start process automatically
                 _stateManager.StartProcessJob(processJobId);
@@ -811,16 +962,7 @@ namespace SecsGemClient
                     equipmentStateLabel.ForeColor = Color.Green;
                 });
 
-                var startEventData = new Dictionary<string, object>
-                {
-                    ["ProcessJobId"] = processJobId,
-                    ["Recipe"] = $"AutoRecipe_{processNumber}",
-                    ["StartTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                };
-
-                var s6f11Start = _messageProcessor.CreateS6F11Message(10, startEventData);
-                s6f11Start.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
-                SendSecsMessage(s6f11Start);
+                SendProcessEvent(SecsGemMessages.Events.ProcessStarted, processJobId, recipe);
 
                 this.Invoke((MethodInvoker)delegate
                 {
@@ -841,16 +983,7 @@ namespace SecsGemClient
                     equipmentStateLabel.ForeColor = Color.Blue;
                 });
 
-                var completeEventData = new Dictionary<string, object>
-                {
-                    ["ProcessJobId"] = processJobId,
-                    ["CompletionStatus"] = "SUCCESS",
-                    ["EndTime"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                };
-
-                var s6f11Complete = _messageProcessor.CreateS6F11Message(11, completeEventData);
-                s6f11Complete.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
-                SendSecsMessage(s6f11Complete);
+                SendProcessEvent(SecsGemMessages.Events.ProcessCompleted, processJobId, status: "SUCCESS");
 
                 this.Invoke((MethodInvoker)delegate
                 {
@@ -875,7 +1008,6 @@ namespace SecsGemClient
 
                 if (_connectedHost?.Connected == true)
                 {
-                    // Send status update
                     var statusData = new Dictionary<string, object>
                     {
                         ["EquipmentState"] = _stateManager.ProcessingState.ToString(),
@@ -885,7 +1017,7 @@ namespace SecsGemClient
                         ["Uptime"] = DateTime.Now.ToString("HH:mm:ss")
                     };
 
-                    var s6f11Status = _messageProcessor.CreateS6F11Message(999, statusData);
+                    var s6f11Status = _messageProcessor.CreateS6F11Message(SecsGemMessages.Events.StatusUpdate, statusData);
                     s6f11Status.SessionId = (ushort)int.Parse(deviceIdTextBox.Text);
                     SendSecsMessage(s6f11Status);
 
