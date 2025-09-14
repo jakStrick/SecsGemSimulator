@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<StartupObject>SecsGemSimulatorUnitTests.Program</StartupObject>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MSTest.TestAdapter" Version="3.10.4" />
+		<PackageReference Include="MSTest.TestFramework" Version="3.10.4" />
+		<PackageReference Include="TestToolsToXunitProxy" Version="0.0.4" />
+
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+		<PackageReference Include="MSTest.TestAdapter" Version="3.1.1" />
+		<PackageReference Include="MSTest.TestFramework" Version="3.1.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\SecsGemClient\SecsGemClient.csproj" />
+		<ProjectReference Include="..\SecsGemServer\BasicSecsGemServer.csproj" />
+	</ItemGroup>
+
+
+</Project>
+
