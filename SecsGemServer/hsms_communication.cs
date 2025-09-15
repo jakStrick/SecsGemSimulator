@@ -146,8 +146,8 @@ namespace BasicSecsGemServer
             var selectMessage = new HsmsMessage
             {
                 SessionId = (ushort)DeviceId,
-                HeaderByte2 = 0x00, // W-bit = 0, Stream = 0
-                HeaderByte3 = 0x00, // Function = 0
+                HeaderByte2 = 0x01, // W-bit = 0, Stream = 0
+                HeaderByte3 = 0x01, // Function = 0
                 PType = HsmsPType.SelectReq,
                 SType = HsmsSType.SelectReq,
                 SystemBytes = GetNextSystemBytes()
