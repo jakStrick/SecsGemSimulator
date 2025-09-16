@@ -416,6 +416,13 @@ namespace BasicSecsGemServer
         {
             var messageKey = $"S{message.Stream}F{message.Function}";
 
+            // Filter out HSMS control messages (e.g., S0F10)
+            if (message.Stream == 0 && message.Function == 10)
+            {
+                LogMessage("Received HSMS Select.req (S0F10) - handled at transport layer, ignoring.", LogType.General);
+                return;
+            }
+
             // Check if message is defined
             if (!SecsGemMessages.MessageDefinitions.TryGetValue(messageKey, out var messageInfo))
             {

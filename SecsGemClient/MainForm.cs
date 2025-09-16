@@ -504,6 +504,13 @@ namespace SecsGemClient
             var messageKey = $"S{message.Stream}F{message.Function}";
             var messageText = $"{messageKey}{(message.WBit ? "W" : "")}";
 
+            // Filter out HSMS control messages (e.g., S0F10)
+            if (message.Stream == 0 && message.Function == 10)
+            {
+                LogMessage("Received HSMS Select.req (S0F10) - handled at transport layer, ignoring.", LogType.General);
+                return;
+            }
+
             this.Invoke((MethodInvoker)delegate
             {
                 AddMessageToLog($"RX: {messageText}");
