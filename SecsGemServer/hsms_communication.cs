@@ -123,15 +123,18 @@ namespace BasicSecsGemServer
 
                 linkTestTimer?.Dispose();
                 cancellationTokenSource?.Cancel();
-
+                tcpClient.GetStream()?.Close();
 
                 await SendDeselectRequest();
                 await Task.Delay(1000); // Allow time for deselect response
 
 
+
+
                 TcpStream.Close();
                 tcpClient.Close();
                 tcpClient = null;
+                TcpStream = null;
 
                 OnConnectionStateChanged(ConnectionState.Disconnected);
             }

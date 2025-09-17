@@ -729,7 +729,9 @@ namespace SecsGemClient
 
                 if (_connectedHost?.Connected == true)
                 {
+                    _connectedHost.GetStream()?.Close();
                     _connectedHost.Close();
+                    _connectedHost = null;
                 }
 
                 _tcpListener?.Stop();
